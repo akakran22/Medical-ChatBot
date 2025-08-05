@@ -68,6 +68,7 @@ def process_medical_pdf():
         print(f"Error processing medical PDF: {e}")
         return False
 
+
 @app.route('/')
 def index():
     """Main chat interface"""
