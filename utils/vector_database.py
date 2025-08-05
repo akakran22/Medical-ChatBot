@@ -4,6 +4,8 @@ import pickle
 import os
 from sentence_transformers import SentenceTransformer
 from typing import List, Tuple, Dict
+from faiss import IndexHNSWFlat  
+
 
 # Global variables
 vector_index = None
@@ -21,15 +23,18 @@ def initialize_embeddings():
     print(f"Embedding model loaded. Dimension: {dimension}")
     return embedding_model
 
+
 def create_vector_index():
-    """Create FAISS vector index"""
     global vector_index, dimension
     if dimension is None:
         initialize_embeddings()
-    
-    print("Creating FAISS vector index")
-    vector_index = faiss.IndexFlatIP(dimension)  # Inner product for cosine similarity
-    print("FAISS index created successfully")
+
+    print("Creating FAISS HNSW vector index")
+    # HNSW graph-based index
+    vector_index = faiss.IndexHNSWFlat(dimension, 32)  # 32 is M, number of neighbors
+    vector_index.hnsw.efSearch = 64  # Optional: controls search performance
+    vector_index.hnsw.efConstruction = 40
+    print("FAISS HNSW index created successfully")
     return vector_index
 
 def generate_embeddings(texts: List[str]) -> np.ndarray:
