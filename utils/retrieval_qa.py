@@ -3,24 +3,25 @@ from typing import List, Tuple, Dict
 from utils.vector_database import similarity_search
 
 def create_medical_prompt_template():
-    return """You are an expert medical assistant with access to comprehensive medical knowledge.
+    return """You are a highly knowledgeable and professional medical assistant. Use the medical context provided below, along with your general medical knowledge, to generate accurate, helpful, and easy-to-understand responses to the user's question.
 
-Based on the provided medical context, answer the user's question clearly and accurately.
+Instructions:
+• Prioritize information found in the medical context whenever relevant.
+• If specific details are not present in the context, provide a reliable and informative response based on your broader medical knowledge—without stating that the context is lacking.
+• Structure your response using clear formatting, such as bullet points (•) or numbered lists, where appropriate.
+• Use professional yet approachable language suitable for both medical professionals and laypersons.
+• Explain complex medical terms in simple language when needed.
+• Do not mention the absence or presence of information in the context. Focus on delivering a complete and helpful answer.
 
-GUIDELINES:
-1) Provide clear, well-structured responses.
-2) Use bullet points or numbered lists for complex information.
-3) Explain medical terms in simple language.
-4) Be specific and factual based on the context.
-5) If the context doesn't contain relevant information, clearly state this.
-6) Don't use + for bullet points and use • .
-
-MEDICAL CONTEXT:
+Medical Context:
 {context}
 
-USER QUESTION: {question}
+User Question:
+{question}
 
-RESPONSE:"""
+Answer:"""
+
+
 
 def retrieve_relevant_context(query: str, top_k: int = 5) -> str:
     print(f"Retrieving relevant context for: '{query[:50]}...'")
@@ -41,41 +42,67 @@ def retrieve_relevant_context(query: str, top_k: int = 5) -> str:
     print(f"Retrieved {len(results)} relevant contexts")
     return formatted_context
 
+
+
 def generate_medical_response(query: str, groq_client: Groq) -> str:
-    """Generate medical response using RAG approach"""
     print(f"Generating response for query...")
-    
     try:
-        # Step 1: Retrieve relevant context
-        context = retrieve_relevant_context(query, top_k=4)
+        top_k = 3
+        max_top_k = 12
+        retries = 0
+        final_response = ""
         
-        # Step 2: Create prompt
-        prompt_template = create_medical_prompt_template()
-        prompt = prompt_template.format(context=context, question=query)
+        while top_k <= max_top_k:
+            context = retrieve_relevant_context(query, top_k=top_k)
+            prompt_template = create_medical_prompt_template()
+            prompt = prompt_template.format(context=context, question=query)
+            
+            completion = groq_client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.2,
+                max_tokens=1200,
+                top_p=0.9,
+                stream=False
+            )
+            
+            response = completion.choices[0].message.content
+            formatted_response = format_medical_response(response)
+            final_response = formatted_response
+            
+            # Critic Agent: Check if answer is too vague
+            if is_response_complete(formatted_response):
+                print(f"Response accepted with top_k = {top_k}")
+                break
+            else:
+                print(f"Incomplete response with top_k = {top_k}. Retrying...")
+                top_k += 1
+                retries += 1
         
-        # Step 3: Generate response
-        completion = groq_client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.2,  # Lower temperature for more accurate medical responses
-            max_tokens=1200,
-            top_p=0.9,
-            stream=False
-        )
+        if retries > 0:
+            print(f"Critic agent improved answer in {retries} attempt(s)")
         
-        response = completion.choices[0].message.content
-        
-        # Step 4: Clean and format response
-        formatted_response = format_medical_response(response)
-        
-        print("Medical response generated successfully")
-        return formatted_response
-        
+        return final_response
+
     except Exception as e:
         print(f"Error generating medical response: {e}")
         return "I apologize, but I encountered an error while processing your medical question. Please try rephrasing your question or consult a healthcare professional directly."
+
+
+def is_response_complete(response: str) -> bool:
+    """Critic agent checks if response is likely complete"""
+    vague_phrases = [
+        "I'm sorry", "I don't know", "insufficient information",
+        "not enough context", "I cannot provide", "I am unable"
+    ]
+    
+    if not response or len(response) < 80:
+        return False
+    
+    return not any(phrase.lower() in response.lower() for phrase in vague_phrases)
+
+
+
 
 def format_medical_response(response: str) -> str:
     # Remove excessive formatting
